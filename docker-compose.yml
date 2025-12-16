@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  mongo:
+    image: mongo:6
+    container_name: volunteerhub-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: volunteerhub
+    volumes:
+      - mongo_data:/data/db
+    restart: always
+
+  backend:
+    build: .
+    container_name: volunteerhub-backend
+    ports:
+      - "4000:4000"   # <-- sửa để đúng port server.js
+    depends_on:
+      - mongo
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - /app/node_modules
+    restart: always
+
+volumes:
+  mongo_data:
