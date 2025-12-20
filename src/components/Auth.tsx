@@ -21,38 +21,115 @@ export function Auth({ onLogin }: AuthProps) {
   const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
   const [accountType, setAccountType] = useState<'volunteer' | 'manager'>('volunteer');
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (loginEmail && loginPassword) {
-      // Check user type based on email and password
-      let userType: 'user' | 'manager' | 'admin' = 'user';
-      let name = 'Alex Thompson';
-      
-      if (loginEmail === 'admin@gmail.com' && loginPassword === '1') {
-        userType = 'admin';
-        name = 'Admin';
-      } else if (loginEmail === 'manager@gmail.com' && loginPassword === '1') {
-        userType = 'manager';
-        name = 'Manager';
+  type UserRole = "volunteer" | "manager";
+  type SignupRole = "volunteer" | "manager";
+
+  interface LoginResponse {
+      token: string;
+      user: {
+          id: string;
+          email: string;
+          name: string;
+          role: UserRole;
+      };
+  }
+
+  const handleLogin = async (e: React.FormEvent) => {
+      e.preventDefault();
+
+      if (!loginEmail || !loginPassword) {
+          alert("Please enter email and password");
+          return;
       }
-      
-      // In a real app, this would authenticate with a backend
-      onLogin(loginEmail, name, userType);
-    }
+
+      try {
+          const res = await fetch("http://localhost:4000/api/auth/login", {
+              method: "POST",
+              headers: {
+                  "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                  email: loginEmail,
+                  password: loginPassword,
+              }),
+          });
+
+          const data: LoginResponse | { error: string } = await res.json();
+
+          if (!res.ok) {
+              alert("error" in data ? data.error : "Login failed");
+              return;
+          }
+
+          const { token, user } = data as LoginResponse;
+
+          // ✅ Lưu token & user (KHÔNG lưu password)
+          localStorage.setItem("token", token);
+          localStorage.setItem("user", JSON.stringify(user));
+
+          // ✅ Gọi logic login hiện tại của bạn
+          onLogin(user.email, user.name, user.role);
+
+      } catch (err) {
+          console.error("Login error:", err);
+          alert("Cannot connect to server");
+      }
   };
 
-  const handleSignup = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (signupEmail && signupPassword && signupName && signupPassword === signupConfirmPassword) {
-      // In a real app, this would create an account with a backend
-      // If signing up as manager, the account would go to pending approval
-      // For demo purposes, we'll log them in directly but in production this would be pending
-      const userType = accountType === 'volunteer' ? 'user' : 'user'; // Both go through as user for now
-      onLogin(signupEmail, signupName, userType);
-    }
+  const handleSignup = async (e: React.FormEvent) => {
+      e.preventDefault();
+
+      if (!signupName || !signupEmail || !signupPassword || !signupConfirmPassword) {
+          alert("Please fill all required fields");
+          return;
+      }
+
+      if (signupPassword !== signupConfirmPassword) {
+          alert("Passwords do not match");
+          return;
+      }
+
+      const role: SignupRole =
+          accountType === "manager" ? "manager" : "volunteer";
+
+      try {
+          const res = await fetch("http://localhost:4000/api/auth/register", {
+              method: "POST",
+              headers: {
+                  "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                  name: signupName,
+                  email: signupEmail,
+                  password: signupPassword,
+                  role,
+              }),
+          });
+          const data = await res.json();
+
+          if (!res.ok) {
+              alert(data.error || "Signup failed");
+              return;
+          }
+
+          // ✅ KHÔNG auto-login
+          alert(
+              role === "manager"
+                  ? "Signup successful. Your manager account is pending approval."
+                  : "Signup successful. Please login."
+          );
+
+          // UX nhỏ: chuyển sang form login, điền sẵn email
+          setLoginEmail(signupEmail);
+
+      } catch (err) {
+          console.error("Signup error:", err);
+          alert("Cannot connect to server");
+      }
   };
 
-  return (
+
+    return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-primary/10 p-4">
       <div className="w-full max-w-6xl grid md:grid-cols-2 gap-8 items-center">
         {/* Left Side - Branding */}
