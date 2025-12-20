@@ -6,6 +6,8 @@ const userSchema = new mongoose.Schema({
   passwordHash: { type: String, required: true },
   role: { type: String, enum: ['volunteer','manager','admin'], default: 'volunteer' },
   isLocked: { type: Boolean, default: false },
+  bio: { type: String, default: '' },        // ← Thêm
+  avatar: { type: String, default: '' },      // ← Thêm
   createdAt: { type: Date, default: Date.now }
 });
 
