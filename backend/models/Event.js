@@ -13,7 +13,5 @@ const eventSchema = new mongoose.Schema({
   attendeesCount: { type: Number, default: 0 }
 });
 
-//module.exports = mongoose.model('Event', eventSchema);
-// Dòng mới đã sửa lỗi:
-// Kiểm tra xem mongoose.models.User đã tồn tại chưa. Nếu có rồi (||) thì dùng cái cũ. Nếu chưa thì tạo mới.
-module.exports = mongoose.models.User || mongoose.model('Event', eventSchema);
+// [ĐÃ SỬA] Sửa từ mongoose.models.User → mongoose.models.Event
+module.exports = mongoose.models.Event || mongoose.model('Event', eventSchema);
