@@ -3,6 +3,7 @@ const { auth } = require('../middleware/auth');
 const Post = require('../models/Post');
 const Comment = require('../models/Comment');
 const Event = require('../models/Event');
+const Notification = require('../models/Notification'); // ← THÊM DÒNG NÀY
 
 const router = express.Router();
 
@@ -13,13 +14,13 @@ const router = express.Router();
 router.get('/', async (req, res) => {
     try {
         const posts = await Post.find()
-            .populate('authorId', 'name avatar') // Lấy tên và ảnh đại diện
-            .populate('eventId', 'title')       // Lấy tên sự kiện để hiển thị
-            .sort({ createdAt: -1 });           // Sắp xếp bài mới nhất lên đầu
-        // Cách đơn giản nhất là map qua các post và lấy comment của chúng
+            .populate('authorId', 'name avatar')
+            .populate('eventId', 'title')
+            .sort({ createdAt: -1 });
+
         const postsWithComments = await Promise.all(posts.map(async (post) => {
             const comments = await Comment.find({ postId: post._id }).populate('authorId', 'name');
-            return { ...post._doc, comments }; // Gộp comments vào object post
+            return { ...post._doc, comments };
         }));
 
         res.json(postsWithComments);
@@ -100,14 +101,13 @@ router.get('/feed', auth, async (req, res) => {
 // Route GET / cũ giữ nguyên cho public view
 /**
  * @route   POST /api/posts
- * @desc    Tạo bài viết mới (Đã sửa để khớp với body từ Feed.tsx)
+ * @desc    Tạo bài viết mới
  */
 router.post('/', auth, async (req, res) => {
     try {
-        const { eventId, content } = req.body; // Lấy dữ liệu từ body thay vì params
+        const { eventId, content } = req.body;
 
-        // Kiểm tra sự kiện có tồn tại và đã được duyệt không
-        const event = await Event.findById(eventId);
+        const event = await Event.findById(eventId).populate('createdBy');
         if (!event || event.status !== 'approved') {
             return res.status(400).json({ error: 'Event not available for posts' });
         }
@@ -119,6 +119,18 @@ router.post('/', auth, async (req, res) => {
         });
 
         await newPost.save();
+
+        // ✅ TẠO NOTIFICATION CHO MANAGER (nếu không phải chính manager post)
+        if (event.createdBy && event.createdBy._id.toString() !== req.user._id.toString()) {
+            await Notification.create({
+                userId: event.createdBy._id,
+                type: 'message',
+                title: 'New Post on Your Event',
+                message: `${req.user.name} posted on "${event.title}"`,
+                relatedEvent: event._id
+            });
+        }
+
         res.json(newPost);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -145,6 +157,14 @@ router.get('/:eventId/posts', async (req, res) => {
  */
 router.post('/post/:postId/comment', auth, async (req, res) => {
     try {
+        const post = await Post.findById(req.params.postId)
+            .populate('authorId', '_id name')
+            .populate('eventId', 'title');
+
+        if (!post) {
+            return res.status(404).json({ error: 'Post not found' });
+        }
+
         const comment = new Comment({
             postId: req.params.postId,
             authorId: req.user._id,
@@ -152,6 +172,18 @@ router.post('/post/:postId/comment', auth, async (req, res) => {
         });
 
         await comment.save();
+
+        // ✅ TẠO NOTIFICATION CHO TÁC GIẢ BÀI VIẾT (nếu không phải chính mình comment)
+        if (post.authorId._id.toString() !== req.user._id.toString()) {
+            await Notification.create({
+                userId: post.authorId._id,
+                type: 'message',
+                title: 'New Comment on Your Post',
+                message: `${req.user.name} commented on your post about "${post.eventId.title}"`,
+                relatedEvent: post.eventId._id
+            });
+        }
+
         res.json(comment);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -162,22 +194,36 @@ router.post('/post/:postId/comment', auth, async (req, res) => {
  * @route   POST /api/posts/post/:postId/like
  * @desc    Like hoặc Unlike bài viết
  */
-// routes/posts.js
 router.post('/post/:postId/like', auth, async (req, res) => {
     try {
-        const post = await Post.findById(req.params.postId);
+        const post = await Post.findById(req.params.postId)
+            .populate('authorId', '_id name')
+            .populate('eventId', 'title');
+
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         const idx = post.likes.findIndex(id => id.equals(req.user._id));
+        const isLiking = idx === -1; // true nếu đang like, false nếu đang unlike
 
-        if (idx === -1) {
+        if (isLiking) {
             post.likes.push(req.user._id);
+
+            // ✅ TẠO NOTIFICATION CHO TÁC GIẢ BÀI VIẾT (nếu không phải chính mình like)
+            if (post.authorId._id.toString() !== req.user._id.toString()) {
+                await Notification.create({
+                    userId: post.authorId._id,
+                    type: 'message',
+                    title: 'Someone Liked Your Post',
+                    message: `${req.user.name} liked your post about "${post.eventId.title}"`,
+                    relatedEvent: post.eventId._id
+                });
+            }
         } else {
+            // Unlike - không cần tạo notification
             post.likes.splice(idx, 1);
         }
 
         await post.save();
-        // QUAN TRỌNG: Trả về mảng likes để Frontend không bị crash
         res.json({ ok: true, likes: post.likes });
     } catch (err) {
         res.status(500).json({ error: err.message });

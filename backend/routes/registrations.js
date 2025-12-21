@@ -2,6 +2,7 @@ const express = require('express');
 const { auth, permit } = require('../middleware/auth');
 const Registration = require('../models/Registration');
 const Event = require('../models/Event');
+const Notification = require('../models/Notification'); // ← THÊM DÒNG NÀY
 
 const router = express.Router();
 
@@ -9,7 +10,6 @@ const router = express.Router();
 
 // Get my registration history
 // GET /api/registrations/me/history
-// *** ĐẶT ROUTE NÀY LÊN TRƯỚC ROUTE GET /:eventId ***
 router.get('/me/history', auth, permit('volunteer'), async (req, res) => {
     try {
         const regs = await Registration.find({ userId: req.user._id })
@@ -22,22 +22,19 @@ router.get('/me/history', auth, permit('volunteer'), async (req, res) => {
                 }
             })
             .sort({ registeredAt: -1 });
-        
+
         res.json(regs);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-
-
 // Cancel registration (Volunteer only)
 // DELETE /api/registrations/:eventId/cancel
 router.delete('/:eventId/cancel', auth, permit('volunteer'), async (req, res) => {
     try {
         const { eventId } = req.params;
-        
-        // Tìm registration của user cho event này
+
         const registration = await Registration.findOne({
             eventId,
             userId: req.user._id
@@ -47,27 +44,37 @@ router.delete('/:eventId/cancel', auth, permit('volunteer'), async (req, res) =>
             return res.status(404).json({ error: 'Registration not found' });
         }
 
-        // Chỉ cho phép cancel nếu đang pending hoặc approved
         if (registration.status === 'completed') {
-            return res.status(400).json({ 
-                error: 'Cannot cancel completed registration' 
+            return res.status(400).json({
+                error: 'Cannot cancel completed registration'
             });
         }
 
         if (registration.status === 'cancelled') {
-            return res.status(400).json({ 
-                error: 'Registration already cancelled' 
+            return res.status(400).json({
+                error: 'Registration already cancelled'
             });
         }
 
-        // Đánh dấu là cancelled
         registration.status = 'cancelled';
         await registration.save();
 
-        res.json({ 
-            ok: true, 
+        // ✅ TẠO NOTIFICATION CHO MANAGER
+        const event = await Event.findById(eventId).populate('createdBy');
+        if (event && event.createdBy) {
+            await Notification.create({
+                userId: event.createdBy._id,
+                type: 'update',
+                title: 'Registration Cancelled',
+                message: `${req.user.name} has cancelled their registration for "${event.title}"`,
+                relatedEvent: event._id
+            });
+        }
+
+        res.json({
+            ok: true,
             message: 'Registration cancelled successfully',
-            registration 
+            registration
         });
     } catch (err) {
         console.error('Cancel registration error:', err);
@@ -82,7 +89,7 @@ router.post('/:eventId/register', auth, permit('volunteer'), async (req, res) =>
         const { eventId } = req.params;
 
         // 1. Kiểm tra event có tồn tại và đã được approve
-        const event = await Event.findById(eventId);
+        const event = await Event.findById(eventId).populate('createdBy');
         if (!event) {
             return res.status(404).json({ error: 'Event not found' });
         }
@@ -103,25 +110,34 @@ router.post('/:eventId/register', auth, permit('volunteer'), async (req, res) =>
         });
 
         if (existingReg) {
-            // Nếu đã cancel/reject trước đó, cho phép đăng ký lại
             if (existingReg.status === 'cancelled' || existingReg.status === 'rejected') {
                 existingReg.status = 'pending';
                 existingReg.registeredAt = new Date();
                 await existingReg.save();
 
-                return res.json({ 
-                    message: 'Re-registered successfully', 
-                    registration: existingReg 
+                // ✅ TẠO NOTIFICATION CHO MANAGER - RE-REGISTRATION
+                if (event.createdBy) {
+                    await Notification.create({
+                        userId: event.createdBy._id,
+                        type: 'registration',
+                        title: 'New Registration Request',
+                        message: `${req.user.name} has re-registered for "${event.title}"`,
+                        relatedEvent: event._id
+                    });
+                }
+
+                return res.json({
+                    message: 'Re-registered successfully',
+                    registration: existingReg
                 });
             }
 
-            // Nếu đang pending, approved hoặc completed
-            return res.status(400).json({ 
-                error: `Already ${existingReg.status} for this event` 
+            return res.status(400).json({
+                error: `Already ${existingReg.status} for this event`
             });
         }
 
-        // 4. Tạo registration mới với status 'pending' (chờ manager approve)
+        // 4. Tạo registration mới với status 'pending'
         const registration = new Registration({
             eventId,
             userId: req.user._id,
@@ -130,12 +146,22 @@ router.post('/:eventId/register', auth, permit('volunteer'), async (req, res) =>
 
         await registration.save();
 
-        // Populate để trả về đầy đủ thông tin
+        // ✅ TẠO NOTIFICATION CHO MANAGER - NEW REGISTRATION
+        if (event.createdBy) {
+            await Notification.create({
+                userId: event.createdBy._id,
+                type: 'registration',
+                title: 'New Registration Request',
+                message: `${req.user.name} has registered for your event "${event.title}"`,
+                relatedEvent: event._id
+            });
+        }
+
         await registration.populate('eventId', 'title dateStart dateEnd location');
 
-        res.status(201).json({ 
-            message: 'Registration submitted. Waiting for approval.', 
-            registration 
+        res.status(201).json({
+            message: 'Registration submitted. Waiting for approval.',
+            registration
         });
 
     } catch (err) {
@@ -146,31 +172,27 @@ router.post('/:eventId/register', auth, permit('volunteer'), async (req, res) =>
 
 // --- PHẦN DÀNH CHO TỔ CHỨC & ADMIN (Manager/Admin) ---
 
-// [MỚI - BỔ SUNG] Get registrations for an event
+// Get registrations for an event
 // GET /api/registrations/:eventId
-// *** ĐẶT ROUTE NÀY SAU /me/history ***
 router.get('/:eventId', auth, permit('manager', 'admin'), async (req, res) => {
     try {
         const { eventId } = req.params;
 
-        // Kiểm tra event có tồn tại
         const event = await Event.findById(eventId);
         if (!event) {
             return res.status(404).json({ error: 'Event not found' });
         }
 
-        // Ownership Check (Nếu là Manager - chỉ xem event của mình)
         if (req.user.role === 'manager') {
             if (event.createdBy.toString() !== req.user._id.toString()) {
                 return res.status(403).json({ error: 'Forbidden: You do not own this event' });
             }
         }
 
-        // Lấy tất cả registrations của event
         const regs = await Registration.find({ eventId })
             .populate('userId', 'name email avatar')
             .sort({ registeredAt: -1 });
-        
+
         res.json(regs);
     } catch (err) {
         console.error('Get registrations error:', err);
@@ -178,96 +200,118 @@ router.get('/:eventId', auth, permit('manager', 'admin'), async (req, res) => {
     }
 });
 
-// [MỚI - BỔ SUNG] Approve registration
+// Approve registration
 // PATCH /api/registrations/:regId/approve
 router.patch('/:regId/approve', auth, permit('manager', 'admin'), async (req, res) => {
     try {
-        const r = await Registration.findById(req.params.regId).populate('eventId');
+        const r = await Registration.findById(req.params.regId)
+            .populate('eventId')
+            .populate('userId', 'name');
+
         if (!r) return res.status(404).json({ error: 'Registration not found' });
 
-        // Ownership Check (Nếu là Manager)
         if (req.user.role === 'manager') {
             if (!r.eventId || r.eventId.createdBy.toString() !== req.user._id.toString()) {
                 return res.status(403).json({ error: 'Forbidden: Ownership check failed' });
             }
         }
 
-        // Không cho phép approve nếu đã completed hoặc cancelled
         if (r.status === 'completed' || r.status === 'cancelled') {
-            return res.status(400).json({ 
-                error: `Cannot approve ${r.status} registration` 
+            return res.status(400).json({
+                error: `Cannot approve ${r.status} registration`
             });
         }
 
         r.status = 'approved';
         await r.save();
-        
-        // TODO: notify volunteer
+
+        // ✅ TẠO NOTIFICATION CHO VOLUNTEER
+        await Notification.create({
+            userId: r.userId._id,
+            type: 'update',
+            title: 'Registration Approved',
+            message: `Your registration for "${r.eventId.title}" has been approved!`,
+            relatedEvent: r.eventId._id
+        });
+
         res.json({ ok: true, registration: r });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// [MỚI - BỔ SUNG] Reject registration
+// Reject registration
 // PATCH /api/registrations/:regId/reject
 router.patch('/:regId/reject', auth, permit('manager', 'admin'), async (req, res) => {
     try {
-        const r = await Registration.findById(req.params.regId).populate('eventId');
+        const r = await Registration.findById(req.params.regId)
+            .populate('eventId')
+            .populate('userId', 'name');
+
         if (!r) return res.status(404).json({ error: 'Registration not found' });
 
-        // Ownership Check (Nếu là Manager)
         if (req.user.role === 'manager') {
             if (!r.eventId || r.eventId.createdBy.toString() !== req.user._id.toString()) {
                 return res.status(403).json({ error: 'Forbidden: Ownership check failed' });
             }
         }
 
-        // Không cho phép reject nếu đã completed
         if (r.status === 'completed') {
             return res.status(400).json({ error: 'Cannot reject completed registration' });
         }
 
         r.status = 'rejected';
         await r.save();
-        
-        // TODO: notify volunteer
+
+        // ✅ TẠO NOTIFICATION CHO VOLUNTEER
+        await Notification.create({
+            userId: r.userId._id,
+            type: 'update',
+            title: 'Registration Rejected',
+            message: `Your registration for "${r.eventId.title}" has been rejected`,
+            relatedEvent: r.eventId._id
+        });
+
         res.json({ ok: true, registration: r });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// [MỚI - BỔ SUNG] Mark as Completed (Sau khi sự kiện kết thúc)
+// Mark as Completed
 // PATCH /api/registrations/:regId/completed
 router.patch('/:regId/completed', auth, permit('manager', 'admin'), async (req, res) => {
     try {
-        const r = await Registration.findById(req.params.regId).populate('eventId');
+        const r = await Registration.findById(req.params.regId)
+            .populate('eventId')
+            .populate('userId', 'name');
+
         if (!r) return res.status(404).json({ error: 'Registration not found' });
 
-        // Ownership Check
         if (req.user.role === 'manager') {
             if (!r.eventId || r.eventId.createdBy.toString() !== req.user._id.toString()) {
                 return res.status(403).json({ error: 'Forbidden: Ownership check failed' });
             }
         }
 
-        // Chỉ đánh dấu hoàn thành cho các đơn đã được duyệt
         if (r.status !== 'approved') {
-            return res.status(400).json({ 
-                error: 'Only approved registrations can be marked as completed' 
+            return res.status(400).json({
+                error: 'Only approved registrations can be marked as completed'
             });
         }
 
-        // (Tùy chọn) Kiểm tra xem sự kiện đã kết thúc chưa
-        // if (new Date() < new Date(r.eventId.dateEnd)) {
-        //     return res.status(400).json({ error: 'Event has not ended yet' });
-        // }
-
         r.status = 'completed';
         await r.save();
-        
-        // TODO: notify volunteer & maybe award points
+
+        // ✅ TẠO NOTIFICATION CHO VOLUNTEER
+        await Notification.create({
+            userId: r.userId._id,
+            type: 'update',
+            title: 'Event Completed',
+            message: `Thank you for participating in "${r.eventId.title}"!`,
+            relatedEvent: r.eventId._id
+        });
+
         res.json({ ok: true, registration: r });
     } catch (err) {
         res.status(500).json({ error: err.message });
