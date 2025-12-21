@@ -5,7 +5,7 @@ VolunteerHub is a web application for managing and participating in volunteer ev
 
 ## Project Structure
 
-- `backend/` — Node.js/Express REST API for authentication, events, users, posts, and registrations.
+- `backend/` — Node.js/Express RESTful API for authentication, events, users, posts, and registrations.
 - `frontend/` — React + Vite app for the user interface.
 
 ## Getting Started
