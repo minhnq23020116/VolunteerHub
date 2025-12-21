@@ -232,7 +232,11 @@ export function Dashboard() {
         return (
             <EventDetail
                 eventId={selectedEventId}
-                onBack={() => setSelectedEventId(null)}
+                onBack={() => {
+                    setSelectedEventId(null);
+                    // Refresh registrations when coming back from detail
+                    fetchMyRegistrations();
+                }}
             />
         );
     }
