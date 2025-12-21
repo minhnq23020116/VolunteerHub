@@ -16,7 +16,13 @@ router.get('/', async (req, res) => {
             .populate('authorId', 'name avatar') // Lấy tên và ảnh đại diện
             .populate('eventId', 'title')       // Lấy tên sự kiện để hiển thị
             .sort({ createdAt: -1 });           // Sắp xếp bài mới nhất lên đầu
-        res.json(posts);
+        // Cách đơn giản nhất là map qua các post và lấy comment của chúng
+        const postsWithComments = await Promise.all(posts.map(async (post) => {
+            const comments = await Comment.find({ postId: post._id }).populate('authorId', 'name');
+            return { ...post._doc, comments }; // Gộp comments vào object post
+        }));
+
+        res.json(postsWithComments);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -86,6 +92,7 @@ router.post('/post/:postId/comment', auth, async (req, res) => {
  * @route   POST /api/posts/post/:postId/like
  * @desc    Like hoặc Unlike bài viết
  */
+// routes/posts.js
 router.post('/post/:postId/like', auth, async (req, res) => {
     try {
         const post = await Post.findById(req.params.postId);
@@ -94,13 +101,14 @@ router.post('/post/:postId/like', auth, async (req, res) => {
         const idx = post.likes.findIndex(id => id.equals(req.user._id));
 
         if (idx === -1) {
-            post.likes.push(req.user._id); // Like
+            post.likes.push(req.user._id);
         } else {
-            post.likes.splice(idx, 1);     // Unlike
+            post.likes.splice(idx, 1);
         }
 
         await post.save();
-        res.json({ ok: true, likesCount: post.likes.length });
+        // QUAN TRỌNG: Trả về mảng likes để Frontend không bị crash
+        res.json({ ok: true, likes: post.likes });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
