@@ -62,6 +62,11 @@ export function Dashboard() {
     const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
     const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
+    // Get user role from localStorage
+    const userStr = localStorage.getItem("user");
+    const userObj = userStr ? JSON.parse(userStr) : null;
+    const userRole = userObj?.role || 'volunteer';
+
     /* =====================
        Fetch data
     ===================== */
@@ -382,43 +387,54 @@ export function Dashboard() {
 
                                     {/* Registration Actions */}
                                     <div className="pt-2 mt-auto">
-                                        {isFuture ? (
-                                            isRegistered ? (
-                                                <div className="space-y-2">
-                                                    <div className="flex items-center justify-between p-3 bg-muted rounded-md">
-                                                        <div className="flex items-center gap-2">
-                                                            <Badge 
-                                                                variant={
-                                                                    registration.status === 'approved' 
-                                                                        ? 'default' 
-                                                                        : 'secondary'
-                                                                }
-                                                                className="capitalize"
-                                                            >
-                                                                {registration.status}
-                                                            </Badge>
-                                                            <span className="text-sm">Registration status</span>
+                                        {userRole === 'volunteer' ? (
+                                            // Only volunteers can register
+                                            isFuture ? (
+                                                isRegistered ? (
+                                                    <div className="space-y-2">
+                                                        <div className="flex items-center justify-between p-3 bg-muted rounded-md">
+                                                            <div className="flex items-center gap-2">
+                                                                <Badge 
+                                                                    variant={
+                                                                        registration.status === 'approved' 
+                                                                            ? 'default' 
+                                                                            : 'secondary'
+                                                                    }
+                                                                    className="capitalize"
+                                                                >
+                                                                    {registration.status}
+                                                                </Badge>
+                                                                <span className="text-sm">Registration status</span>
+                                                            </div>
                                                         </div>
+                                                        <Button
+                                                            variant="outline"
+                                                            className="w-full"
+                                                            onClick={() => handleCancelRegistration(event._id)}
+                                                        >
+                                                            Cancel Registration
+                                                        </Button>
                                                     </div>
+                                                ) : (
                                                     <Button
-                                                        variant="outline"
                                                         className="w-full"
-                                                        onClick={() => handleCancelRegistration(event._id)}
+                                                        onClick={() => handleSignUp(event._id)}
                                                     >
-                                                        Cancel Registration
+                                                        Sign Up
                                                     </Button>
-                                                </div>
+                                                )
                                             ) : (
-                                                <Button
-                                                    className="w-full"
-                                                    onClick={() => handleSignUp(event._id)}
-                                                >
-                                                    Sign Up
-                                                </Button>
+                                                <Badge variant="outline" className="w-full justify-center py-2">
+                                                    Event Completed
+                                                </Badge>
                                             )
                                         ) : (
-                                            <Badge variant="outline" className="w-full justify-center py-2">
-                                                Event Completed
+                                            // Managers and Admins see view-only info
+                                            <Badge 
+                                                variant="outline" 
+                                                className="w-full justify-center py-2"
+                                            >
+                                                {isFuture ? 'View Event' : 'Event Completed'}
                                             </Badge>
                                         )}
                                     </div>

@@ -5,6 +5,9 @@ import {
     MapPin,
     Users,
     Share2,
+    Heart,
+    MessageSquare,
+    Send,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader } from "./ui/card";
@@ -42,6 +45,23 @@ interface Registration {
     registeredAt: string;
 }
 
+interface CommentType {
+    _id: string;
+    content: string;
+    authorId: { name: string; avatar?: string };
+    createdAt: string;
+}
+
+interface Post {
+    _id: string;
+    content: string;
+    authorId: { _id: string; name: string; avatar?: string };
+    eventId: { _id: string; title: string };
+    likes: string[];
+    createdAt: string;
+    comments?: CommentType[];
+}
+
 interface EventDetailProps {
     eventId: string;
     onBack: () => void;
@@ -54,7 +74,17 @@ interface EventDetailProps {
 export function EventDetail({ eventId, onBack }: EventDetailProps) {
     const [event, setEvent] = useState<VolunteerEvent | null>(null);
     const [myRegistration, setMyRegistration] = useState<Registration | null>(null);
+    const [posts, setPosts] = useState<Post[]>([]);
     const [loading, setLoading] = useState(true);
+    const [postsLoading, setPostsLoading] = useState(true);
+    const [canViewPosts, setCanViewPosts] = useState(false);
+    const [commentTexts, setCommentTexts] = useState<{ [key: string]: string }>({});
+
+    // Get user role from localStorage
+    const userStr = localStorage.getItem("user");
+    const userObj = userStr ? JSON.parse(userStr) : null;
+    const userRole = userObj?.role || 'volunteer';
+    const currentUserId = userObj?.id;
 
     /* =====================
        Fetch event and registration
@@ -96,19 +126,80 @@ export function EventDetail({ eventId, onBack }: EventDetailProps) {
             });
 
             setMyRegistration(reg || null);
+
+            // Determine if user can view posts for this event
+            if (userRole === 'admin') {
+                setCanViewPosts(true);
+            } else if (userRole === 'manager') {
+                // Check if user is the event owner (will check after event is loaded)
+                setCanViewPosts(false); // Will update after event fetch
+            } else if (userRole === 'volunteer') {
+                // Can view if approved or completed
+                setCanViewPosts(reg && (reg.status === 'approved' || reg.status === 'completed') || false);
+            }
         } catch (err) {
             console.error(err);
+        }
+    };
+
+    const fetchPosts = async () => {
+        if (!canViewPosts) {
+            setPostsLoading(false);
+            return;
+        }
+
+        setPostsLoading(true);
+        try {
+            const token = localStorage.getItem("token");
+            const res = await fetch("http://localhost:4000/api/posts/feed", {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
+            
+            if (!res.ok) throw new Error();
+            
+            const allPosts = await res.json();
+            
+            // Filter posts for this specific event
+            const eventPosts = allPosts.filter((post: Post) => 
+                post.eventId._id === eventId
+            );
+            
+            setPosts(eventPosts);
+        } catch (err) {
+            console.error("Failed to fetch posts:", err);
+        } finally {
+            setPostsLoading(false);
         }
     };
 
     useEffect(() => {
         const loadData = async () => {
             setLoading(true);
-            await Promise.all([fetchEvent(), fetchMyRegistration()]);
+            await fetchEvent();
+            await fetchMyRegistration();
             setLoading(false);
         };
         loadData();
     }, [eventId]);
+
+    // Fetch posts after permissions are determined
+    useEffect(() => {
+        if (!loading && event) {
+            // Update canViewPosts for manager based on event ownership
+            if (userRole === 'manager' && event.createdBy) {
+                const isOwner = userObj?.id === event.createdBy._id;
+                setCanViewPosts(isOwner);
+            }
+        }
+    }, [loading, event, userRole]);
+
+    useEffect(() => {
+        if (canViewPosts) {
+            fetchPosts();
+        }
+    }, [canViewPosts]);
 
     /* =====================
        Registration actions
@@ -161,6 +252,52 @@ export function EventDetail({ eventId, onBack }: EventDetailProps) {
             await fetchMyRegistration(); // Refresh registration status
         } catch (err) {
             toast.error("Failed to cancel registration");
+        }
+    };
+
+    const handleLike = async (postId: string) => {
+        const token = localStorage.getItem("token");
+        if (!token) return toast.error("Please login to like");
+
+        try {
+            const res = await fetch(`http://localhost:4000/api/posts/post/${postId}/like`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            const data = await res.json();
+
+            if (res.ok && data.likes) {
+                setPosts(prevPosts => prevPosts.map(p =>
+                    p._id === postId ? { ...p, likes: data.likes } : p
+                ));
+            }
+        } catch (err) {
+            console.error("Like error", err);
+        }
+    };
+
+    const handleSendComment = async (postId: string) => {
+        const text = commentTexts[postId];
+        if (!text?.trim()) return;
+
+        try {
+            const token = localStorage.getItem("token");
+            const res = await fetch(`http://localhost:4000/api/posts/post/${postId}/comment`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({ content: text })
+            });
+
+            if (res.ok) {
+                toast.success("Commented!");
+                setCommentTexts({ ...commentTexts, [postId]: "" });
+                fetchPosts(); // Reload posts to show new comment
+            }
+        } catch (err) {
+            toast.error("Failed to comment");
         }
     };
 
@@ -277,11 +414,96 @@ export function EventDetail({ eventId, onBack }: EventDetailProps) {
                     <Card>
                         <CardHeader>
                             <h3 className="text-xl font-semibold">Community Posts</h3>
+                            {!canViewPosts && (
+                                <p className="text-sm text-muted-foreground">
+                                    {userRole === 'volunteer' 
+                                        ? 'Register and get approved to see posts from this event'
+                                        : 'You need to be the event owner to view posts'}
+                                </p>
+                            )}
                         </CardHeader>
-                        <CardContent className="py-12 text-center">
-                            <p className="text-muted-foreground">
-                                No posts yet. Be the first to volunteer and share your experience!
-                            </p>
+                        <CardContent>
+                            {!canViewPosts ? (
+                                <div className="py-12 text-center text-muted-foreground">
+                                    <p>You don't have permission to view posts for this event.</p>
+                                </div>
+                            ) : postsLoading ? (
+                                <div className="py-8 text-center text-muted-foreground">Loading posts...</div>
+                            ) : posts.length > 0 ? (
+                                <div className="space-y-6">
+                                    {posts.map((post) => (
+                                        <div key={post._id} className="border-b pb-6 last:border-b-0 last:pb-0">
+                                            <div className="mb-3">
+                                                <p className="font-bold">{post.authorId?.name || "Volunteer"}</p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {new Date(post.createdAt).toLocaleDateString()}
+                                                </p>
+                                            </div>
+                                            
+                                            <p className="text-sm leading-relaxed whitespace-pre-wrap mb-4">{post.content}</p>
+
+                                            {/* Like & Comment */}
+                                            <div className="flex flex-col gap-4 pt-4 border-t border-muted">
+                                                <div className="flex items-center gap-6">
+                                                    <button
+                                                        onClick={() => handleLike(post._id)}
+                                                        className={`flex items-center gap-1.5 text-sm transition-colors ${
+                                                            post.likes?.some(id => String(id) === String(currentUserId))
+                                                                ? "text-red-500 font-bold"
+                                                                : "text-muted-foreground hover:text-red-500"
+                                                        }`}
+                                                    >
+                                                        <Heart
+                                                            className={`h-4 w-4 ${
+                                                                post.likes?.some(id => String(id) === String(currentUserId))
+                                                                    ? "fill-red-500 text-red-500"
+                                                                    : ""
+                                                            }`}
+                                                            fill={post.likes?.some(id => String(id) === String(currentUserId)) ? "currentColor" : "none"}
+                                                        />
+                                                        <span>{post.likes?.length || 0} Likes</span>
+                                                    </button>
+                                                    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                                                        <MessageSquare className="h-4 w-4" />
+                                                        <span>{post.comments?.length || 0} Comments</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Comments */}
+                                                {post.comments && post.comments.length > 0 && (
+                                                    <div className="space-y-3">
+                                                        {post.comments.map((comment) => (
+                                                            <div key={comment._id} className="bg-muted/30 p-2 rounded-lg text-sm">
+                                                                <span className="font-bold mr-2">{comment.authorId?.name}:</span>
+                                                                <span className="text-muted-foreground">{comment.content}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+
+                                                {/* Comment Input */}
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Write a comment..."
+                                                        className="flex-1 text-sm border rounded-full px-4 py-1.5 bg-muted/30 focus:outline-none focus:ring-1 focus:ring-primary"
+                                                        value={commentTexts[post._id] || ""}
+                                                        onChange={(e) => setCommentTexts({ ...commentTexts, [post._id]: e.target.value })}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleSendComment(post._id)}
+                                                    />
+                                                    <Button size="sm" variant="ghost" className="rounded-full" onClick={() => handleSendComment(post._id)}>
+                                                        <Send className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="py-12 text-center text-muted-foreground">
+                                    <p>No posts yet. Be the first to share your experience!</p>
+                                </div>
+                            )}
                         </CardContent>
                     </Card>
                 </div>
@@ -308,53 +530,66 @@ export function EventDetail({ eventId, onBack }: EventDetailProps) {
                                 </div>
                             </div>
 
-                            {isFuture ? (
-                                isRegistered ? (
-                                    <div className="space-y-3">
-                                        <div className="p-3 bg-muted rounded-md">
-                                            <div className="flex items-center justify-between mb-2">
-                                                <span className="text-sm font-medium">Registration Status</span>
-                                                <Badge
-                                                    variant={
-                                                        myRegistration.status === 'approved'
-                                                            ? 'default'
-                                                            : 'secondary'
-                                                    }
-                                                    className="capitalize"
-                                                >
-                                                    {myRegistration.status}
-                                                </Badge>
+                            {userRole === 'volunteer' ? (
+                                // Only volunteers can register
+                                isFuture ? (
+                                    isRegistered ? (
+                                        <div className="space-y-3">
+                                            <div className="p-3 bg-muted rounded-md">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="text-sm font-medium">Registration Status</span>
+                                                    <Badge
+                                                        variant={
+                                                            myRegistration.status === 'approved'
+                                                                ? 'default'
+                                                                : 'secondary'
+                                                        }
+                                                        className="capitalize"
+                                                    >
+                                                        {myRegistration.status}
+                                                    </Badge>
+                                                </div>
+                                                {myRegistration.status === 'pending' && (
+                                                    <p className="text-xs text-muted-foreground">
+                                                        Waiting for organizer approval
+                                                    </p>
+                                                )}
                                             </div>
-                                            {myRegistration.status === 'pending' && (
-                                                <p className="text-xs text-muted-foreground">
-                                                    Waiting for organizer approval
-                                                </p>
-                                            )}
+                                            <Button
+                                                variant="outline"
+                                                className="w-full"
+                                                onClick={handleCancelRegistration}
+                                            >
+                                                Cancel Registration
+                                            </Button>
                                         </div>
+                                    ) : (
                                         <Button
-                                            variant="outline"
                                             className="w-full"
-                                            onClick={handleCancelRegistration}
+                                            size="lg"
+                                            onClick={handleSignUp}
                                         >
-                                            Cancel Registration
+                                            Sign Up to Volunteer
                                         </Button>
-                                    </div>
+                                    )
                                 ) : (
-                                    <Button
-                                        className="w-full"
-                                        size="lg"
-                                        onClick={handleSignUp}
+                                    <Badge
+                                        variant="outline"
+                                        className="w-full justify-center py-3 text-base"
                                     >
-                                        Sign Up to Volunteer
-                                    </Button>
+                                        Event Completed
+                                    </Badge>
                                 )
                             ) : (
-                                <Badge
-                                    variant="outline"
-                                    className="w-full justify-center py-3 text-base"
-                                >
-                                    Event Completed
-                                </Badge>
+                                // Managers and Admins see info message
+                                <div className="p-4 bg-muted rounded-md text-center">
+                                    <p className="text-sm text-muted-foreground">
+                                        {userRole === 'manager' 
+                                            ? 'As a manager, you can view event details but cannot register as a volunteer.'
+                                            : 'As an admin, you can view event details but cannot register as a volunteer.'
+                                        }
+                                    </p>
+                                </div>
                             )}
                         </CardContent>
                     </Card>

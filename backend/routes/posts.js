@@ -28,6 +28,76 @@ router.get('/', async (req, res) => {
     }
 });
 
+
+// Thêm route mới /feed vào posts.js (giữ nguyên route GET / cũ)
+
+// Get posts for feed (filtered based on user role and permissions)
+router.get('/feed', auth, async (req, res) => {
+  try {
+    const Registration = require('../models/Registration');
+    const Event = require('../models/Event');
+    const Comment = require('../models/Comment');
+    
+    let visibleEventIds = [];
+
+    // 1. Admin: See all posts
+    if (req.user.role === 'admin') {
+      const allPosts = await Post.find()
+        .populate('authorId', 'name avatar')
+        .populate('eventId', 'title')
+        .sort({ createdAt: -1 });
+      
+      // Fetch comments for each post
+      const postsWithComments = await Promise.all(allPosts.map(async (post) => {
+        const comments = await Comment.find({ postId: post._id })
+          .populate('authorId', 'name avatar')
+          .sort({ createdAt: 1 });
+        return { ...post._doc, comments };
+      }));
+      
+      return res.json(postsWithComments);
+    }
+
+    // 2. Manager: See posts from events they own
+    if (req.user.role === 'manager') {
+      const ownedEvents = await Event.find({ createdBy: req.user._id }).select('_id');
+      visibleEventIds = ownedEvents.map(e => e._id.toString());
+    }
+
+    // 3. Volunteer: See posts from events they have approved/completed registrations
+    if (req.user.role === 'volunteer') {
+      const myRegistrations = await Registration.find({
+        userId: req.user._id,
+        status: { $in: ['approved', 'completed'] }
+      }).select('eventId');
+      
+      visibleEventIds = myRegistrations.map(r => r.eventId.toString());
+    }
+
+    // 4. Fetch posts for visible events
+    const posts = await Post.find({ 
+      eventId: { $in: visibleEventIds } 
+    })
+      .populate('authorId', 'name avatar')
+      .populate('eventId', 'title')
+      .sort({ createdAt: -1 });
+
+    // 5. Fetch comments for each post
+    const postsWithComments = await Promise.all(posts.map(async (post) => {
+      const comments = await Comment.find({ postId: post._id })
+        .populate('authorId', 'name avatar')
+        .sort({ createdAt: 1 });
+      return { ...post._doc, comments };
+    }));
+
+    res.json(postsWithComments);
+  } catch (err) {
+    console.error('Get posts error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Route GET / cũ giữ nguyên cho public view
 /**
  * @route   POST /api/posts
  * @desc    Tạo bài viết mới (Đã sửa để khớp với body từ Feed.tsx)

@@ -15,6 +15,22 @@ import { toast } from "sonner";
    Interfaces
 ===================== */
 
+interface Event {
+    _id: string;
+    title: string;
+    description?: string;
+    category?: string;
+    dateStart: string;
+    dateEnd: string;
+    location?: string;
+    status: string;
+    createdBy: {
+        _id: string;
+        name: string;
+        email: string;
+    };
+}
+
 interface Registration {
     _id: string;
     eventId: {
@@ -34,22 +50,6 @@ interface Registration {
     userId: string;
     status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed';
     registeredAt: string;
-    contributionConfirmed?: boolean;
-}
-
-interface MyEvent {
-    registrationId: string;
-    _id: string;
-    title: string;
-    category?: string;
-    dateStart: string;
-    dateEnd: string;
-    location?: string;
-    createdBy: {
-        name: string;
-    };
-    registrationStatus: string;
-    contributionConfirmed?: boolean;
 }
 
 interface CommentType {
@@ -74,7 +74,9 @@ interface Post {
 ===================== */
 
 export function Feed() {
-    const [events, setEvents] = useState<MyEvent[]>([]);
+    const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
+    const [contributedEvents, setContributedEvents] = useState<Event[]>([]);
+    const [postableEvents, setPostableEvents] = useState<Event[]>([]);
     const [loading, setLoading] = useState(true);
     const [posts, setPosts] = useState<Post[]>([]);
     const [postsLoading, setPostsLoading] = useState(true);
@@ -82,15 +84,13 @@ export function Feed() {
     const [createPostOpen, setCreatePostOpen] = useState(false);
     const [selectedEvent, setSelectedEvent] = useState("");
     const [postContent, setPostContent] = useState("");
-
-    // State cho ô nhập bình luận của từng bài viết
     const [commentTexts, setCommentTexts] = useState<{ [key: string]: string }>({});
 
-    // Lấy ID người dùng hiện tại để kiểm tra trạng thái Like
-    // [CẬP NHẬT MỚI] Trích xuất ID từ đối tượng 'user' được lưu trong Auth.tsx
+    // Get user info
     const userStr = localStorage.getItem("user");
     const userObj = userStr ? JSON.parse(userStr) : null;
-    const currentUserId = userObj?.id; // Auth.tsx lưu là 'id'
+    const currentUserId = userObj?.id;
+    const userRole = userObj?.role || 'volunteer';
 
     /* =====================
        Fetch Data Functions
@@ -99,7 +99,12 @@ export function Feed() {
     const fetchPosts = async () => {
         setPostsLoading(true);
         try {
-            const res = await fetch("http://localhost:4000/api/posts");
+            const token = localStorage.getItem("token");
+            const res = await fetch("http://localhost:4000/api/posts/feed", {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
             if (!res.ok) throw new Error("Failed to fetch community posts");
             const data = await res.json();
             setPosts(data);
@@ -114,47 +119,132 @@ export function Feed() {
     const fetchMyEvents = async () => {
         try {
             const token = localStorage.getItem("token");
-            const headers = { Authorization: `Bearer ${token}` };
-
-            const [regRes, ownedRes] = await Promise.all([
-                fetch("http://localhost:4000/api/registrations/me/history", { headers }),
-                fetch("http://localhost:4000/api/events", { headers })
-            ]);
-
-            let combinedEvents: MyEvent[] = [];
-
-            if (regRes.ok) {
-                const regData: Registration[] = await regRes.json();
-                const fromReg = regData.filter(reg => reg.eventId).map(reg => ({
-                    registrationId: reg._id,
-                    _id: reg.eventId._id,
-                    title: reg.eventId.title,
-                    registrationStatus: reg.status,
-                    contributionConfirmed: reg.contributionConfirmed || reg.status === 'completed'
-                }));
-                combinedEvents = [...fromReg];
+            if (!token) {
+                setLoading(false);
+                return;
             }
+            
+            const headers = { Authorization: `Bearer ${token}` };
+            const role = userRole;
 
-            if (ownedRes.ok) {
-                const ownedData = await ownedRes.json();
-                const fromOwned = ownedData
-                    .filter((ev: any) => !combinedEvents.some(ce => ce._id === ev._id))
-                    .map((ev: any) => ({
-                        registrationId: `owner-${ev._id}`,
+            if (role === 'volunteer') {
+                const regRes = await fetch("http://localhost:4000/api/registrations/me/history", { headers });
+
+                if (regRes.ok) {
+                    const regData: Registration[] = await regRes.json();
+                    
+                    const upcoming = regData
+                        .filter(reg => 
+                            reg.eventId && 
+                            reg.status === 'approved' && 
+                            new Date(reg.eventId.dateStart) >= new Date()
+                        )
+                        .map(reg => ({
+                            _id: reg.eventId._id,
+                            title: reg.eventId.title,
+                            description: '',
+                            category: reg.eventId.category,
+                            dateStart: reg.eventId.dateStart,
+                            dateEnd: reg.eventId.dateEnd,
+                            location: reg.eventId.location || '',
+                            status: reg.eventId.status,
+                            createdBy: reg.eventId.createdBy
+                        }));
+                    
+                    const contributed = regData
+                        .filter(reg => 
+                            reg.eventId && 
+                            reg.status === 'completed'
+                        )
+                        .map(reg => ({
+                            _id: reg.eventId._id,
+                            title: reg.eventId.title,
+                            description: '',
+                            category: reg.eventId.category,
+                            dateStart: reg.eventId.dateStart,
+                            dateEnd: reg.eventId.dateEnd,
+                            location: reg.eventId.location || '',
+                            status: reg.eventId.status,
+                            createdBy: reg.eventId.createdBy
+                        }));
+                    
+                    const postable = regData
+                        .filter(reg => 
+                            reg.eventId && 
+                            (reg.status === 'approved' || reg.status === 'completed')
+                        )
+                        .map(reg => ({
+                            _id: reg.eventId._id,
+                            title: reg.eventId.title,
+                            description: '',
+                            category: reg.eventId.category,
+                            dateStart: reg.eventId.dateStart,
+                            dateEnd: reg.eventId.dateEnd,
+                            location: reg.eventId.location || '',
+                            status: reg.eventId.status,
+                            createdBy: reg.eventId.createdBy
+                        }));
+                    
+                    setUpcomingEvents(upcoming);
+                    setContributedEvents(contributed);
+                    setPostableEvents(postable);
+                }
+            } else if (role === 'manager' || role === 'admin') {
+                const eventsRes = await fetch("http://localhost:4000/api/events/me", { headers });
+
+                if (eventsRes.ok) {
+                    const eventsData = await eventsRes.json();
+                    const now = new Date();
+                    now.setHours(0, 0, 0, 0);
+
+                    const upcoming = eventsData
+                        .filter((ev: any) => new Date(ev.dateStart) >= now)
+                        .map((ev: any) => ({
+                            _id: ev._id,
+                            title: ev.title,
+                            description: ev.description || '',
+                            category: ev.category,
+                            dateStart: ev.dateStart,
+                            dateEnd: ev.dateEnd,
+                            location: ev.location || '',
+                            status: ev.status,
+                            createdBy: ev.createdBy
+                        }));
+
+                    const contributed = eventsData
+                        .filter((ev: any) => new Date(ev.dateStart) < now)
+                        .map((ev: any) => ({
+                            _id: ev._id,
+                            title: ev.title,
+                            description: ev.description || '',
+                            category: ev.category,
+                            dateStart: ev.dateStart,
+                            dateEnd: ev.dateEnd,
+                            location: ev.location || '',
+                            status: ev.status,
+                            createdBy: ev.createdBy
+                        }));
+
+                    const postable = eventsData.map((ev: any) => ({
                         _id: ev._id,
                         title: ev.title,
-                        dateStart: ev.dateStart, // QUAN TRỌNG: Phải lấy ngày bắt đầu
-                        location: ev.location,
-                        registrationStatus: 'owner',
-                        contributionConfirmed: false // Đổi thành false để hiện ở mục Upcoming
+                        description: ev.description || '',
+                        category: ev.category,
+                        dateStart: ev.dateStart,
+                        dateEnd: ev.dateEnd,
+                        location: ev.location || '',
+                        status: ev.status,
+                        createdBy: ev.createdBy
                     }));
-                combinedEvents = [...combinedEvents, ...fromOwned];
-            }
 
-            setEvents(combinedEvents);
+                    setUpcomingEvents(upcoming);
+                    setContributedEvents(contributed);
+                    setPostableEvents(postable);
+                }
+            }
         } catch (err) {
-            console.error(err);
-            toast.error("Failed to load events list");
+            console.error("Fetch events error:", err);
+            toast.error("Failed to load events");
         } finally {
             setLoading(false);
         }
@@ -181,7 +271,6 @@ export function Feed() {
             const data = await res.json();
 
             if (res.ok && data.likes) {
-                // Cập nhật mảng likes từ backend trả về
                 setPosts(prevPosts => prevPosts.map(p =>
                     p._id === postId ? { ...p, likes: data.likes } : p
                 ));
@@ -209,7 +298,7 @@ export function Feed() {
             if (res.ok) {
                 toast.success("Commented!");
                 setCommentTexts({ ...commentTexts, [postId]: "" });
-                fetchPosts(); // Load lại để hiện bình luận mới
+                fetchPosts();
             }
         } catch (err) {
             toast.error("Failed to comment");
@@ -252,45 +341,135 @@ export function Feed() {
        Render
     ===================== */
 
-    const pendingEvents = events.filter(e => e.registrationStatus === 'pending');
-    const upcomingEvents = events.filter(e =>
-        (e.registrationStatus === 'approved' || e.registrationStatus === 'owner') &&
-        new Date(e.dateStart) >= new Date() // Chỉ hiện các sự kiện chưa diễn ra
-    );
     return (
         <div className="max-w-2xl mx-auto space-y-6 pb-24">
             <div>
                 <h1 className="text-3xl font-bold">My Events Feed</h1>
-                <p className="text-muted-foreground mt-2">Track your volunteer journey and share your experiences</p>
+                <p className="text-muted-foreground mt-2">
+                    Track your volunteer journey and share your experiences
+                </p>
             </div>
 
-            {/* Pending & Upcoming Sections */}
-            {pendingEvents.length > 0 && (
-                <Card>
-                    <CardHeader><h3 className="text-xl font-semibold">Pending Approval</h3></CardHeader>
-                    <CardContent className="space-y-3">
-                        {pendingEvents.map((event) => (
-                            <div key={event.registrationId} className="flex items-start justify-between p-3 rounded-lg border border-yellow-200 bg-yellow-50/50">
-                                <div>
-                                    <h4 className="font-medium">{event.title}</h4>
-                                    <p className="text-sm text-muted-foreground">Waiting for manager approval</p>
-                                </div>
-                                <Badge variant="outline" className="bg-yellow-100 text-yellow-800">Pending</Badge>
-                            </div>
-                        ))}
-                    </CardContent>
-                </Card>
-            )}
-
+            {/* Upcoming Events */}
             <Card>
-                <CardHeader><h3 className="text-xl font-semibold">Your Upcoming Events</h3></CardHeader>
-                <CardContent className="space-y-3">
-                    {loading ? <p className="text-center">Loading...</p> : upcomingEvents.map((event) => (
-                        <div key={event.registrationId} className="p-3 rounded-lg border hover:border-primary">
-                            <h4 className="font-medium">{event.title}</h4>
-                            <p className="text-sm text-muted-foreground">{event.location}</p>
-                        </div>
-                    ))}
+                <CardHeader>
+                    <h3 className="text-xl font-semibold">
+                        {userRole === 'volunteer' ? 'Your Upcoming Events' : 'Your Upcoming Events'}
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                        {userRole === 'volunteer' 
+                            ? "Events you're registered for that haven't happened yet"
+                            : "Future events you're managing"
+                        }
+                    </p>
+                </CardHeader>
+                <CardContent>
+                    <div className="space-y-3">
+                        {loading ? (
+                            <p className="text-center text-muted-foreground py-4">Loading...</p>
+                        ) : upcomingEvents.length > 0 ? (
+                            upcomingEvents.map((event) => (
+                                <div key={event._id} className="flex items-start gap-4 p-3 rounded-lg border hover:border-primary transition-colors">
+                                    <div className="w-20 h-20 bg-muted rounded overflow-hidden flex-shrink-0">
+                                        <img 
+                                            src="https://images.unsplash.com/photo-1521737604893-d14cc237f11d"
+                                            alt={event.title}
+                                            className="w-full h-full object-cover"
+                                        />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="flex-1 min-w-0">
+                                                <h4 className="font-medium line-clamp-1">{event.title}</h4>
+                                                <p className="text-sm text-muted-foreground">
+                                                    {event.createdBy.name}
+                                                </p>
+                                            </div>
+                                            {event.category && (
+                                                <Badge variant="secondary" className="capitalize flex-shrink-0">
+                                                    {event.category}
+                                                </Badge>
+                                            )}
+                                        </div>
+                                        <p className="text-sm text-muted-foreground mt-1">
+                                            {new Date(event.dateStart).toLocaleDateString()} • {event.location}
+                                        </p>
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <p className="text-center text-muted-foreground py-4">
+                                {userRole === 'volunteer' 
+                                    ? "No upcoming events. Check the Dashboard to find opportunities!"
+                                    : "No upcoming events. Create new events in Event Manager!"
+                                }
+                            </p>
+                        )}
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Contributed Events */}
+            <Card>
+                <CardHeader>
+                    <h3 className="text-xl font-semibold">
+                        {userRole === 'volunteer' ? 'Contributed Events' : 'Past Events'}
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                        {userRole === 'volunteer'
+                            ? "Events where your contribution has been confirmed by organizers"
+                            : "Events you've managed that have already occurred"
+                        }
+                    </p>
+                </CardHeader>
+                <CardContent>
+                    <div className="space-y-3">
+                        {loading ? (
+                            <p className="text-center text-muted-foreground py-4">Loading...</p>
+                        ) : contributedEvents.length > 0 ? (
+                            contributedEvents.map((event) => (
+                                <div key={event._id} className="flex items-start gap-4 p-3 rounded-lg border bg-muted/30">
+                                    <div className="w-20 h-20 bg-muted rounded overflow-hidden flex-shrink-0">
+                                        <img 
+                                            src="https://images.unsplash.com/photo-1521737604893-d14cc237f11d"
+                                            alt={event.title}
+                                            className="w-full h-full object-cover"
+                                        />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <h4 className="font-medium line-clamp-1">{event.title}</h4>
+                                                    <Badge className="shrink-0 text-xs bg-green-100 text-green-800 hover:bg-green-100">
+                                                        {userRole === 'volunteer' ? 'Confirmed' : 'Completed'}
+                                                    </Badge>
+                                                </div>
+                                                <p className="text-sm text-muted-foreground">
+                                                    {event.createdBy.name}
+                                                </p>
+                                            </div>
+                                            {event.category && (
+                                                <Badge variant="secondary" className="capitalize flex-shrink-0">
+                                                    {event.category}
+                                                </Badge>
+                                            )}
+                                        </div>
+                                        <p className="text-sm text-muted-foreground mt-1">
+                                            {new Date(event.dateStart).toLocaleDateString()} • {event.location}
+                                        </p>
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <p className="text-center text-muted-foreground py-4">
+                                {userRole === 'volunteer'
+                                    ? "No confirmed contributions yet. Once event organizers confirm your participation, they will appear here!"
+                                    : "No past events yet. Events you manage will appear here after they occur."
+                                }
+                            </p>
+                        )}
+                    </div>
                 </CardContent>
             </Card>
 
@@ -315,13 +494,11 @@ export function Feed() {
                             <CardContent>
                                 <p className="text-sm leading-relaxed whitespace-pre-wrap">{post.content}</p>
 
-                                {/* Like & Comment Controls */}
                                 <div className="flex flex-col gap-4 mt-4 pt-4 border-t border-muted">
                                     <div className="flex items-center gap-6">
                                         <button
                                             onClick={() => handleLike(post._id)}
                                             className={`flex items-center gap-1.5 text-sm transition-colors ${
-                                                // Kiểm tra xem ID người dùng có trong mảng likes không
                                                 post.likes?.some(id => String(id) === String(currentUserId))
                                                     ? "text-red-500 font-bold"
                                                     : "text-muted-foreground hover:text-red-500"
@@ -333,14 +510,13 @@ export function Feed() {
                                                         ? "fill-red-500 text-red-500"
                                                         : ""
                                                 }`}
-                                                // Lấp đầy màu cho trái tim khi đã like
                                                 fill={post.likes?.some(id => String(id) === String(currentUserId)) ? "currentColor" : "none"}
                                             />
                                             <span>{post.likes?.length || 0} Likes</span>
                                         </button>
                                         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                                             <MessageSquare className="h-4 w-4" />
-                                            <span>Comment</span>
+                                            <span>{post.comments?.length || 0} Comments</span>
                                         </div>
                                     </div>
 
@@ -355,7 +531,6 @@ export function Feed() {
                                         </div>
                                     )}
 
-                                    {/* Input Field */}
                                     <div className="flex gap-2">
                                         <input
                                             type="text"
@@ -374,54 +549,83 @@ export function Feed() {
                         </Card>
                     ))
                 ) : (
-                    <Card><CardContent className="py-12 text-center text-muted-foreground"><p>No posts yet.</p></CardContent></Card>
+                    <Card>
+                        <CardContent className="py-12 text-center text-muted-foreground">
+                            <p>No posts yet. Be the first to share your experience!</p>
+                        </CardContent>
+                    </Card>
                 )}
             </div>
 
-            {/* Floating Create Post Button */}
             <Button
                 size="lg"
                 className="fixed bottom-8 right-8 h-14 w-14 rounded-full shadow-lg"
                 onClick={() => setCreatePostOpen(true)}
-                disabled={events.length === 0}
+                disabled={postableEvents.length === 0}
             >
                 <Plus className="h-6 w-6" />
             </Button>
 
-            {/* Create Post Dialog */}
             <Dialog open={createPostOpen} onOpenChange={setCreatePostOpen}>
                 <DialogContent className="max-w-2xl">
                     <DialogHeader>
                         <DialogTitle>Share Your Experience</DialogTitle>
-                        <DialogDescription>Tell others about your recent activity</DialogDescription>
+                        <DialogDescription>
+                            Create a post about an event you're participating in or have contributed to
+                        </DialogDescription>
                     </DialogHeader>
 
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
                             <Label>Select Event</Label>
                             <Select value={selectedEvent} onValueChange={setSelectedEvent}>
-                                <SelectTrigger><SelectValue placeholder="Choose an event" /></SelectTrigger>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Choose an event" />
+                                </SelectTrigger>
                                 <SelectContent>
-                                    {events.map((event) => (
-                                        <SelectItem key={event._id} value={event._id}>
-                                            {event.title} <span className="text-xs opacity-50">({event.registrationStatus})</span>
+                                    {postableEvents.length > 0 ? (
+                                        postableEvents.map((event) => (
+                                            <SelectItem key={event._id} value={event._id}>
+                                                {event.title}
+                                            </SelectItem>
+                                        ))
+                                    ) : (
+                                        <SelectItem value="none" disabled>
+                                            No events available for posting
                                         </SelectItem>
-                                    ))}
+                                    )}
                                 </SelectContent>
                             </Select>
                         </div>
                         <div className="space-y-2">
                             <Label>Your Story</Label>
                             <Textarea
-                                placeholder="What happened today?"
+                                placeholder="Share your experience, what you learned, or how you made an impact..."
                                 value={postContent}
                                 onChange={(e) => setPostContent(e.target.value)}
                                 className="min-h-[150px]"
                             />
+                            <p className="text-xs text-muted-foreground">
+                                {postContent.length} characters
+                            </p>
                         </div>
                         <div className="flex justify-end gap-2">
-                            <Button variant="outline" onClick={() => setCreatePostOpen(false)}>Cancel</Button>
-                            <Button onClick={handleCreatePost}>Post</Button>
+                            <Button
+                                variant="outline"
+                                onClick={() => {
+                                    setCreatePostOpen(false);
+                                    setSelectedEvent("");
+                                    setPostContent("");
+                                }}
+                            >
+                                Cancel
+                            </Button>
+                            <Button 
+                                onClick={handleCreatePost}
+                                disabled={!selectedEvent || !postContent.trim()}
+                            >
+                                Post
+                            </Button>
                         </div>
                     </div>
                 </DialogContent>
