@@ -28,7 +28,13 @@ router.get('/', async (req,res)=>{
     
   res.json(events);
 });
-
+// xem nhung event ma minh quan ly
+router.get('/me', auth, permit('manager', 'admin'), async (req, res) => {
+  const events = await Event.find({ createdBy: req.user._id })
+    .populate('createdBy', 'name email')
+    .sort({ createdAt: -1 });
+  res.json(events);
+});
 // [CẢI THIỆN] Get single event (Public view)
 router.get('/:id', async (req,res)=>{
   const ev = await Event.findById(req.params.id).populate('createdBy', 'name email');
@@ -42,6 +48,7 @@ router.get('/:id', async (req,res)=>{
 
   res.json(ev);
 });
+
 
 // Create event (manager only)
 // Khi tạo xong status sẽ là 'pending' chờ admin duyệt
