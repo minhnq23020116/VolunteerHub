@@ -12,6 +12,19 @@ interface AuthProps {
   onLogin: (email: string, name: string, userType: 'user' | 'manager' | 'admin') => void;
 }
 
+type UserRole = "volunteer" | "manager" | "admin";
+type SignupRole = "volunteer" | "manager";
+
+interface LoginResponse {
+    token: string;
+    user: {
+        id: string;
+        email: string;
+        name: string;
+        role: UserRole;
+    };
+}
+
 export function Auth({ onLogin }: AuthProps) {
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -20,19 +33,6 @@ export function Auth({ onLogin }: AuthProps) {
   const [signupPassword, setSignupPassword] = useState('');
   const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
   const [accountType, setAccountType] = useState<'volunteer' | 'manager'>('volunteer');
-
-  type UserRole = "volunteer" | "manager";
-  type SignupRole = "volunteer" | "manager";
-
-  interface LoginResponse {
-      token: string;
-      user: {
-          id: string;
-          email: string;
-          name: string;
-          role: UserRole;
-      };
-  }
 
   const handleLogin = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -57,17 +57,22 @@ export function Auth({ onLogin }: AuthProps) {
           const data: LoginResponse | { error: string } = await res.json();
 
           if (!res.ok) {
-              alert("error" in data ? data.error : "Login failed");
+              // Hiển thị thông báo lỗi cụ thể
+              if (res.status === 403) {
+                  alert("Account is pending approval. Please wait for admin to activate your account.");
+              } else {
+                  alert("error" in data ? data.error : "Login failed");
+              }
               return;
           }
 
           const { token, user } = data as LoginResponse;
 
-          // ✅ Lưu token & user (KHÔNG lưu password)
+          // Lưu token & user (KHÔNG lưu password)
           localStorage.setItem("token", token);
           localStorage.setItem("user", JSON.stringify(user));
 
-          // ✅ Gọi logic login hiện tại của bạn
+          // Gọi logic login hiện tại của bạn
           onLogin(user.email, user.name, user.role);
 
       } catch (err) {
@@ -89,8 +94,7 @@ export function Auth({ onLogin }: AuthProps) {
           return;
       }
 
-      const role: SignupRole =
-          accountType === "manager" ? "manager" : "volunteer";
+      const role: SignupRole = accountType === "manager" ? "manager" : "volunteer";
 
       try {
           const res = await fetch("http://localhost:4000/api/auth/register", {
@@ -105,6 +109,7 @@ export function Auth({ onLogin }: AuthProps) {
                   role,
               }),
           });
+          
           const data = await res.json();
 
           if (!res.ok) {
@@ -112,15 +117,15 @@ export function Auth({ onLogin }: AuthProps) {
               return;
           }
 
-          // ✅ KHÔNG auto-login
-          alert(
-              role === "manager"
-                  ? "Signup successful. Your manager account is pending approval."
-                  : "Signup successful. Please login."
-          );
+          // Hiển thị message dựa trên role
+          alert(data.message || "Signup successful. Please login.");
 
-          // UX nhỏ: chuyển sang form login, điền sẵn email
+          // Chuyển sang form login, điền sẵn email
           setLoginEmail(signupEmail);
+          setSignupName("");
+          setSignupEmail("");
+          setSignupPassword("");
+          setSignupConfirmPassword("");
 
       } catch (err) {
           console.error("Signup error:", err);
@@ -128,8 +133,7 @@ export function Auth({ onLogin }: AuthProps) {
       }
   };
 
-
-    return (
+  return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-primary/10 p-4">
       <div className="w-full max-w-6xl grid md:grid-cols-2 gap-8 items-center">
         {/* Left Side - Branding */}
@@ -139,7 +143,7 @@ export function Auth({ onLogin }: AuthProps) {
               <Calendar className="h-8 w-8" />
             </div>
             <div>
-              <h1 className="text-4xl">VolunteerHub</h1>
+              <h1 className="text-4xl font-bold">VolunteerHub</h1>
               <p className="text-muted-foreground">Make a difference in your community</p>
             </div>
           </div>
@@ -150,7 +154,7 @@ export function Auth({ onLogin }: AuthProps) {
                 <Calendar className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3>Discover Opportunities</h3>
+                <h3 className="font-semibold">Discover Opportunities</h3>
                 <p className="text-muted-foreground">
                   Find volunteer events that match your interests and schedule
                 </p>
@@ -162,7 +166,7 @@ export function Auth({ onLogin }: AuthProps) {
                 <User className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3>Connect with Community</h3>
+                <h3 className="font-semibold">Connect with Community</h3>
                 <p className="text-muted-foreground">
                   Join a network of passionate volunteers making real impact
                 </p>
@@ -174,7 +178,7 @@ export function Auth({ onLogin }: AuthProps) {
                 <ArrowRight className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3>Track Your Impact</h3>
+                <h3 className="font-semibold">Track Your Impact</h3>
                 <p className="text-muted-foreground">
                   Record your volunteer hours and celebrate your contributions
                 </p>
@@ -190,7 +194,7 @@ export function Auth({ onLogin }: AuthProps) {
               <div className="flex items-center justify-center w-12 h-12 rounded-full bg-primary text-primary-foreground">
                 <Calendar className="h-6 w-6" />
               </div>
-              <h2>VolunteerHub</h2>
+              <h2 className="text-2xl font-bold">VolunteerHub</h2>
             </div>
             <CardTitle>Welcome</CardTitle>
             <CardDescription>Sign in to your account or create a new one</CardDescription>
@@ -352,7 +356,7 @@ export function Auth({ onLogin }: AuthProps) {
                         <RadioGroupItem value="volunteer" id="volunteer" />
                         <Label htmlFor="volunteer" className="flex-1 cursor-pointer">
                           <div>
-                            <p>Volunteer</p>
+                            <p className="font-medium">Volunteer</p>
                             <p className="text-sm text-muted-foreground">Join events and contribute to your community</p>
                           </div>
                         </Label>
@@ -361,7 +365,7 @@ export function Auth({ onLogin }: AuthProps) {
                         <RadioGroupItem value="manager" id="manager" />
                         <Label htmlFor="manager" className="flex-1 cursor-pointer">
                           <div>
-                            <p>Event Manager</p>
+                            <p className="font-medium">Event Manager</p>
                             <p className="text-sm text-muted-foreground">Create and manage volunteer events (requires approval)</p>
                           </div>
                         </Label>
