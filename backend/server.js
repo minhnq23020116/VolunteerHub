@@ -15,6 +15,8 @@ const eventAdminRoutes = require("./routes/events_admin"); // Route riêng cho A
 const regRoutes = require("./routes/registrations");
 const userAdminRoutes = require("./routes/admin_users"); // Route cho Admin quản lý users
 
+const notificationRoutes = require('./routes/notifications');
+
 // --- 3. App Initialization & Middlewares ---
 const app = express();
 
@@ -87,3 +89,6 @@ connectDB()
     console.error(err.message);
     process.exit(1); // Thoát ứng dụng nếu không kết nối được DB
   });
+
+// Đăng ký route trong server.js
+app.use('/api/notifications', notificationRoutes);
