@@ -8,7 +8,5 @@ const postSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-//module.exports = mongoose.model('Post', postSchema);
-// Dòng mới đã sửa lỗi:
-// Kiểm tra xem mongoose.models.User đã tồn tại chưa. Nếu có rồi (||) thì dùng cái cũ. Nếu chưa thì tạo mới.
-module.exports = mongoose.models.User || mongoose.model('Post', postSchema);
+// Sửa lại dòng cuối cùng
+module.exports = mongoose.models.Post || mongoose.model('Post', postSchema);

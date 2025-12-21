@@ -15,7 +15,9 @@ const eventAdminRoutes = require("./routes/events_admin"); // Route riêng cho A
 const regRoutes = require("./routes/registrations");
 const userAdminRoutes = require("./routes/admin_users"); // Route cho Admin quản lý users
 
-const notificationRoutes = require('./routes/notifications');
+const notificationRoutes = require('./routes/notifications'); // Route cho Notification
+const adminUsersRoutes = require('./routes/admin_users'); // Route cho admin để UserManager
+const postRoutes = require("./routes/posts"); // Thêm dòng này
 
 // --- 3. App Initialization & Middlewares ---
 const app = express();
@@ -40,6 +42,12 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // --- 5. API Route Mounting ---
 
+// Đăng ký route trong server.js
+app.use('/api/notifications', notificationRoutes);
+
+// Post
+app.use('/api/posts', postRoutes)
+
 // Authentication
 app.use("/api/auth", authRoutes);
 
@@ -56,6 +64,8 @@ app.use("/api/admin/events", eventAdminRoutes);
 // Admin User Operations (Quản lý người dùng...)
 app.use("/api/admin/users", userAdminRoutes);
 
+// Admin UserManager
+app.use('/api/admin', adminUsersRoutes);
 
 // --- 6. Error Handling Middleware ---
 // (Nên thêm vào cuối cùng sau các routes để bắt lỗi tập trung)
@@ -89,6 +99,3 @@ connectDB()
     console.error(err.message);
     process.exit(1); // Thoát ứng dụng nếu không kết nối được DB
   });
-
-// Đăng ký route trong server.js
-app.use('/api/notifications', notificationRoutes);

@@ -94,6 +94,10 @@ export function Notifications() {
 
     const getIcon = (type: string) => {
         switch (type) {
+            case 'registration': // Thêm cho đăng ký
+                return <CheckCircle className="h-5 w-5 text-green-500" />;
+            case 'event': // Thêm cho sự kiện
+                return <Calendar className="h-5 w-5 text-blue-500" />;
             case 'signup':
                 return <CheckCircle className="h-5 w-5 text-green-500" />;
             case 'reminder':
@@ -132,7 +136,8 @@ export function Notifications() {
                     {notifications.map((notification, index) => (
                         <div key={notification.id}>
                             <div
-                                className={`p-4 hover:bg-accent/50 transition-colors ${
+                                onClick={() => !notification.read && handleMarkRead(notification.id)}
+                                className={`p-4 cursor-pointer hover:bg-accent/50 transition-colors ${
                                     !notification.read ? 'bg-accent/20' : ''
                                 }`}
                             >
