@@ -9,7 +9,5 @@ const regSchema = new mongoose.Schema({
 
 regSchema.index({ eventId: 1, userId: 1 }, { unique: true });
 
-//module.exports = mongoose.model('Registration', regSchema);
-// Dòng mới đã sửa lỗi:
-// Kiểm tra xem mongoose.models.User đã tồn tại chưa. Nếu có rồi (||) thì dùng cái cũ. Nếu chưa thì tạo mới.
-module.exports = mongoose.models.User || mongoose.model('Registration', regSchema);
+// ✅ SỬA: Kiểm tra đúng model Registration
+module.exports = mongoose.models.Registration || mongoose.model('Registration', regSchema);

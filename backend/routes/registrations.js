@@ -14,8 +14,16 @@ router.get('/me/history', auth, permit('volunteer'), async (req, res) => {
     try {
         // Tìm tất cả registration của user hiện tại
         const regs = await Registration.find({ userId: req.user._id })
-            .populate('eventId', 'title dateStart dateEnd location status') // Lấy thông tin sự kiện liên quan
-            .sort({ registeredAt: -1 }); // Mới nhất lên đầu
+            .populate({
+                path: 'eventId',
+                select: 'title dateStart dateEnd location status category',
+                populate: {
+                    path: 'createdBy',
+                    select: 'name email'
+                }
+            })
+            .sort({ registeredAt: -1 });
+        
         res.json(regs);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -25,6 +33,73 @@ router.get('/me/history', auth, permit('volunteer'), async (req, res) => {
 
 // ... (Giữ nguyên các route register và cancel cũ của bạn ở đây) ...
 // router.post('/:eventId/register', ...)
+
+router.post('/:eventId/register', auth, permit('volunteer'), async (req, res) => {
+    try {
+        const { eventId } = req.params;
+
+        // 1. Kiểm tra event có tồn tại và đã được approve
+        const event = await Event.findById(eventId);
+        if (!event) {
+            return res.status(404).json({ error: 'Event not found' });
+        }
+
+        if (event.status !== 'approved') {
+            return res.status(400).json({ error: 'Cannot register for unapproved event' });
+        }
+
+        // 2. Kiểm tra event đã qua chưa
+        if (new Date() > new Date(event.dateEnd)) {
+            return res.status(400).json({ error: 'Cannot register for past events' });
+        }
+
+        // 3. Kiểm tra user đã đăng ký chưa
+        const existingReg = await Registration.findOne({
+            eventId,
+            userId: req.user._id
+        });
+
+        if (existingReg) {
+            // Nếu đã cancel/reject trước đó, cho phép đăng ký lại
+            if (existingReg.status === 'cancelled' || existingReg.status === 'rejected') {
+                existingReg.status = 'pending';
+                existingReg.registeredAt = new Date();
+                await existingReg.save();
+
+                return res.json({ 
+                    message: 'Re-registered successfully', 
+                    registration: existingReg 
+                });
+            }
+
+            // Nếu đang pending, approved hoặc completed
+            return res.status(400).json({ 
+                error: `Already ${existingReg.status} for this event` 
+            });
+        }
+
+        // 4. Tạo registration mới với status 'pending' (chờ manager approve)
+        const registration = new Registration({
+            eventId,
+            userId: req.user._id,
+            status: 'pending'
+        });
+
+        await registration.save();
+
+        // Populate để trả về đầy đủ thông tin
+        await registration.populate('eventId', 'title dateStart dateEnd location');
+
+        res.status(201).json({ 
+            message: 'Registration submitted. Waiting for approval.', 
+            registration 
+        });
+
+    } catch (err) {
+        console.error('Registration error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 // router.post('/:eventId/cancel', ...)
 
 
